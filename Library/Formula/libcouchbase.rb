@@ -1,13 +1,13 @@
 class Libcouchbase < Formula
   homepage 'http://docs.couchbase.com/developer/c-2.4/c-intro.html'
-  url 'http://packages.couchbase.com/clients/c/libcouchbase-2.4.7.tar.gz'
-  sha1 '62c68ccc269099cdc1fd624324107131347aad45'
+  url 'http://packages.couchbase.com/clients/c/libcouchbase-2.4.9.tar.gz'
+  sha1 '9f7f684214a94e1d7ed21493624a2e9140ef0458'
   head "https://github.com/couchbase/libcouchbase", :using => :git
 
   bottle do
-    sha1 "796da9a16f9fa8ec0cdf57cb372f7c6f7375ef50" => :yosemite
-    sha1 "5f6912141e3147fc9f14fae0d28da7bbcec71c37" => :mavericks
-    sha1 "3a8ca2387248b127802a16ff0b575154a414e4d4" => :mountain_lion
+    sha256 "22a5fb1ca35a2efe74bc395e63cb59fe7caf3b55c58b56703aa3ce56c1225333" => :yosemite
+    sha256 "9f4fdb45ba9d8036fcfa7e6cd810e3bb97f45ffc79ce20cc0970e62b6565b481" => :mavericks
+    sha256 "9d0cf39fa4038d8220d13f17a50f4a80e70e0a28feb11290afcd5e45f884407c" => :mountain_lion
   end
 
   option :universal

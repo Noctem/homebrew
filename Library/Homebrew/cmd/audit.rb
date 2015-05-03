@@ -69,6 +69,10 @@ class FormulaText
   def has_trailing_newline?
     /\Z\n/ =~ @text
   end
+
+  def =~ regex
+    regex =~ @text
+  end
 end
 
 class FormulaAuditor
@@ -129,6 +133,14 @@ class FormulaAuditor
     if formula.class < GithubGistFormula
       problem "GithubGistFormula is deprecated, use Formula instead"
     end
+
+    if formula.class < ScriptFileFormula
+      problem "ScriptFileFormula is deprecated, use Formula instead"
+    end
+
+    if formula.class < AmazonWebServicesFormula
+      problem "AmazonWebServicesFormula is deprecated, use Formula instead"
+    end
   end
 
   @@aliases ||= Formula.aliases
@@ -174,8 +186,12 @@ class FormulaAuditor
             Or if it is indeed a runtime denpendency
               depends_on "#{dep}" => :run
           EOS
-        when "git", "ruby", "mercurial"
-          problem "Don't use #{dep} as a dependency. We allow non-Homebrew #{dep} installations."
+        when "git"
+          problem "Don't use git as a dependency"
+        when "mercurial"
+          problem "Use `depends_on :hg` instead of `depends_on 'mercurial'`"
+        when "ruby"
+          problem "Don't use ruby as a dependency. We allow non-Homebrew ruby installations."
         when 'gfortran'
           problem "Use `depends_on :fortran` instead of `depends_on 'gfortran'`"
         when 'open-mpi', 'mpich2'
@@ -187,6 +203,12 @@ class FormulaAuditor
             EOS
         end
       end
+    end
+  end
+
+  def audit_java_home
+    if text =~ /JAVA_HOME/i && !formula.requirements.map(&:class).include?(JavaDependency)
+      problem "Use `depends_on :java` to set JAVA_HOME"
     end
   end
 
@@ -279,6 +301,10 @@ class FormulaAuditor
       problem "Github Pages links should be https:// (URL is #{homepage})."
     end
 
+    if homepage =~ %r[^http://[^/]*\.apache\.org]
+      problem "Apache homepages should be https:// links (URL is #{homepage})."
+    end
+
     # There's an auto-redirect here, but this mistake is incredibly common too.
     # Only applies to the homepage and subdomains for now, not the FTP links.
     if homepage =~ %r[^http://((?:build|cloud|developer|download|extensions|git|glade|help|library|live|nagios|news|people|projects|rt|static|wiki|www)\.)?gnome\.org]
@@ -289,7 +315,7 @@ class FormulaAuditor
 
     # Check GNU urls; doesn't apply to mirrors
     urls.grep(%r[^(?:https?|ftp)://(?!alpha).+/gnu/]) do |u|
-      problem "\"ftpmirror.gnu.org\" is preferred for GNU software (url is #{u})."
+      problem "\"http://ftpmirror.gnu.org\" is preferred for GNU software (url is #{u})."
     end
 
     # the rest of the checks apply to mirrors as well.
@@ -304,12 +330,16 @@ class FormulaAuditor
       case p
       when %r[^http://ftp\.gnu\.org/]
         problem "ftp.gnu.org urls should be https://, not http:// (url is #{p})."
+      when %r[^http://[^/]*\.apache\.org/]
+        problem "Apache urls should be https://, not http (url is #{p})."
       when %r[^http://code\.google\.com/]
         problem "code.google.com urls should be https://, not http (url is #{p})."
       when %r[^http://fossies\.org/]
         problem "Fossies urls should be https://, not http (url is #{p})."
       when %r[^http://mirrors\.kernel\.org/]
         problem "mirrors.kernel urls should be https://, not http (url is #{p})."
+      when %r[^http://([^/]*\.|)bintray\.com/]
+        problem "Bintray urls should be https://, not http (url is #{p})."
       when %r[^http://tools\.ietf\.org/]
         problem "ietf urls should be https://, not http (url is #{p})."
       end
@@ -387,11 +417,11 @@ class FormulaAuditor
   end
 
   def audit_specs
-    if head_only?(formula) && formula.tap != "Homebrew/homebrew-head-only"
+    if head_only?(formula) && formula.tap.downcase != "homebrew/homebrew-head-only"
       problem "Head-only (no stable download)"
     end
 
-    if devel_only?(formula) && formula.tap != "Homebrew/homebrew-devel-only"
+    if devel_only?(formula) && formula.tap.downcase != "homebrew/homebrew-devel-only"
       problem "Devel-only (no stable download)"
     end
 
@@ -690,13 +720,23 @@ class FormulaAuditor
     if @strict
       if line =~ /system (["'][^"' ]*(?:\s[^"' ]*)+["'])/
         bad_system = $1
-        good_system = bad_system.gsub(" ", "\", \"")
-        problem "Use `system #{good_system}` instead of `system #{bad_system}` "
+        unless %w[| < > & ; *].any? { |c| bad_system.include? c }
+          good_system = bad_system.gsub(" ", "\", \"")
+          problem "Use `system #{good_system}` instead of `system #{bad_system}` "
+        end
       end
 
       if line =~ /(require ["']formula["'])/
         problem "`#{$1}` is now unnecessary"
       end
+    end
+  end
+
+  def audit_caveats
+    caveats = formula.caveats
+
+    if caveats =~ /setuid/
+      problem "Don't recommend setuid in the caveats, suggest sudo instead."
     end
   end
 
@@ -744,10 +784,12 @@ class FormulaAuditor
     audit_specs
     audit_urls
     audit_deps
+    audit_java_home
     audit_conflicts
     audit_options
     audit_patches
     audit_text
+    audit_caveats
     text.without_patch.split("\n").each_with_index { |line, lineno| audit_line(line, lineno+1) }
     audit_installed
     audit_prefix_has_contents
@@ -805,6 +847,10 @@ class ResourceAuditor
     if version.to_s =~ /^v/
       problem "version #{version} should not have a leading 'v'"
     end
+
+    if version.to_s =~ /_\d+$/
+      problem "version #{version} should not end with a underline and a number"
+    end
   end
 
   def audit_checksum
@@ -812,9 +858,15 @@ class ResourceAuditor
 
     case checksum.hash_type
     when :md5
-      problem "MD5 checksums are deprecated, please use SHA1 or SHA256"
+      problem "MD5 checksums are deprecated, please use SHA256"
       return
-    when :sha1   then len = 40
+    when :sha1
+      if ARGV.include? "--strict"
+        problem "SHA1 checksums are deprecated, please use SHA256"
+        return
+      else
+        len = 40
+      end
     when :sha256 then len = 64
     end
 
@@ -830,6 +882,14 @@ class ResourceAuditor
   def audit_download_strategy
     if url =~ %r[^(cvs|bzr|hg|fossil)://] || url =~ %r[^(svn)\+http://]
       problem "Use of the #{$&} scheme is deprecated, pass `:using => :#{$1}` instead"
+    end
+
+    url_strategy = DownloadStrategyDetector.detect(url)
+
+    if using == :git || url_strategy == GitDownloadStrategy
+      if specs[:tag] && !specs[:revision]
+        problem "Git should specify :revision when a :tag is specified."
+      end
     end
 
     return unless using
@@ -858,7 +918,6 @@ class ResourceAuditor
       end
     end
 
-    url_strategy   = DownloadStrategyDetector.detect(url)
     using_strategy = DownloadStrategyDetector.detect('', using)
 
     if url_strategy == using_strategy
